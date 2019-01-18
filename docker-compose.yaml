@@ -21,7 +21,7 @@ services:
     labels: #can be used to communicate info about this service to other services
       - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
     healthcheck: #this command is run periodically so docker can know whether or not this service is actually accessible.  Completely optional.
-      test: ["CMD-SHELL", "mysqladmin -u ${MYSQL_USER:-gatecounter} -h 127.0.0.1 --password=${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value} ping || exit 1"]
+      test: ["CMD-SHELL", "mysqladmin -h $$HOSTNAME -u ${MYSQL_USER:-gatecounter} -h 127.0.0.1 --password=${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value} ping || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -29,7 +29,31 @@ services:
       - "3306:3306" #connects port 3306 of the host (left) to 3306 of this container (right) making it accessible to things outside of our docker virtual network
     expose:
       - "3306"
-    
+
+  gatecounter-db-init: #how this service will be referenced in this file
+    image: yobasystems/alpine-mariadb:armhf
+    environment: #set environment variables for this service.  These will initialize a database
+    #these environment variables will specify how the gate counter script will connect to the db to record data
+      MYSQL_DATABASE: ${MYSQL_DB_NAME:-gatecounter}
+      MYSQL_USER: ${MYSQL_USER:-gatecounter}
+      MYSQL_PASSWORD: ${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PW:?an admin database password is requred.  Please edit .env with this value}
+      TZ: ${TZ:-America/New_York}
+    volumes: #specify where data to be peristed will be stored on host and where it resides within the service
+      - gatecounter-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
+      - ./sql:/docker-entrypoint-initdb.d
+    networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
+      - gatecounter
+    labels: #can be used to communicate info about this service to other services
+      - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
+      - com.docker.compose.oneoff=true
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "\"mysql -h $$HOSTNAME -u root -D ${MYSQL_DB_NAME} -p${MYSQL_ROOT_PW} < /docker-entrypoint-initdb.d/db-init.sql\""
+    depends_on:
+      - gatecounter-db
+
 
   grafana:
     image: grafana/grafana-arm32v7-linux
@@ -50,9 +74,9 @@ services:
     expose:
       - "3000" #makes this port accessible to other containers on the same network, but not availble directly on the host system
     depends_on: #specifies which containers must be up and running before this one can be started
-      #- reverse-proxy
+      - reverse-proxy
       - gatecounter-db
-    environment: 
+    environment:
       GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN_NAME}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PW:?an admin password is requred for Grafana.  Please edit .env with this value}
       GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS}
@@ -82,10 +106,10 @@ services:
       - "3306" #this database only needs to be accessible internally to grafana
 
   #this container makes sure a domain you register for free on https://duckdns.org always points to where this is running
-  dynamic-dns: 
+  dynamic-dns:
     image: lsioarmhf/duckdns
     container_name: duckdns
-    environment: 
+    environment:
       SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:?Please provide a duckdns subdomain for your project.  Please edit .env with this value} #replace with the domain you registered.
       TOKEN: ${DUCKDNS_TOKEN:?Please provide a duckdns token for your domain.  Please edit .env with this value} #the token duckDNS provides you for domain updates
       TZ: ${TZ:-America/New_York}
@@ -117,7 +141,7 @@ services:
 
 #this section specifies where data will be persisted between starts/stops/recreates, etc.  I will be using named docker volumes because that is the most portable
 #way to do this (you don't have to know about the directory structure of where you're going to run it), but you can map host system directories into your containers
-#if you so choose.  You can also specify options for them here.  
+#if you so choose.  You can also specify options for them here.
 volumes:
   gatecounter-db:
   grafana-db:
