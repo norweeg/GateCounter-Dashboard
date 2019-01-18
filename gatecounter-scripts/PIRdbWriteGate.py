@@ -21,11 +21,10 @@ count = 0
 
 try:
 	while True:
+		curr_date = datetime.now()
 
 		if GPIO.input(PIR_PIN):
-			count = count + 1
-
-		#print count
+			count += 1
 
 		# Open database connection
 		db = MySQLdb.connect("HOSTNAME","USERNAME","PASSWORD","DATABASE")
@@ -33,18 +32,15 @@ try:
 		# prepare a cursor object using cursor() method
 		cursor = db.cursor()
 
-		curr_date = datetime.now()
-
-		# Prepare SQL query to INSERT a record into the database.
-		sql = "INSERT INTO PIRSTATS (datetime, gatecount) VALUES ('%s', '%d')" % (curr_date.isoformat(' '), count)
 
 
 		if (curr_date.minute % 10 == 0) and (curr_date.second == 0):
 			try:
 				# Execute the SQL command
-				cursor.execute(sql)
+				cursor.execute("INSERT INTO PIRSTATS (datetime, gatecount) VALUES ('%s', '%d')" % (curr_date.isoformat(' '), count))
 				# Commit your changes in the database
 				db.commit()
+				count = 0 #reset count for next 10-minute interval
 			except:
 				# Rollback in case there is any error
 				db.rollback()

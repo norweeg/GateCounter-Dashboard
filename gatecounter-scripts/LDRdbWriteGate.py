@@ -33,7 +33,7 @@ try:
 		#print mcp.read_adc(0)
 		# Check if current ldr value is less than or greater than ldrConst
 		if mcp.read_adc(0) > 150:
-			count = count + 1
+			count += 1
 
 		# Open database connection
 		db = MySQLdb.connect("HOSTNAME","USERNAME","PASSWORD","DATABASE")
@@ -50,6 +50,7 @@ try:
 				cursor.execute(sql)
 				# Commit your changes in the database
 				db.commit()
+				count = 0 #reset count for next interval
 			except:
 				# Rollback in case there is any error
 				db.rollback()

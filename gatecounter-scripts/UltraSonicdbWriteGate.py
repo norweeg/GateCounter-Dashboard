@@ -52,7 +52,7 @@ try:
 		distance = round(distance, 2)
 
 		if distance < 120:
-			count = count + 1
+			count += 1
 
 		#print count
 		#print distance
@@ -71,6 +71,7 @@ try:
 				cursor.execute(sql)
 				# Commit your changes in the database
 				db.commit()
+				count = 0 #reset count for next interval
 			except:
 				# Rollback in case there is any error
 				db.rollback()
