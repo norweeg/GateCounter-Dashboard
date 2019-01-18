@@ -4,10 +4,12 @@ This repository contains code to implement the [HCCC Library GateCounter](https:
 
 ## Before You Begin
 
-You will need a computer, preferably running Linux, but anything will do.  Download and install Docker and Docker-compose following the instructions for your OS
+You will need a Raspberry Pi or comparable board running Linux.  Download and install Docker and Docker-compose following the instructions for your OS:
 
-* [Docker](https://www.docker.com/community-edition) (or [Docker Toolbox](https://docs.docker.com/toolbox/toolbox_install_windows/) if you do not have Windows 10 Professional or Enterprise.  See description below.)
+* [Docker](https://www.docker.com/community-edition)
 * [Docker-Compose](https://docs.docker.com/compose/install/)
+
+or, if you have a Debian-based Linux on your Pi, e.g. Raspbian, run the included setup script `./install-docker.sh`
 
 Please also, in a developer's text editor e.g. NotePad++ or Microsoft Visual Studio Code, read through docker-compose.yaml to make sure you understand it.  Before starting your stack, you will need to
 
