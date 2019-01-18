@@ -1,0 +1,133 @@
+version: '3.7' #specifies the version of the compose-file specification to use.  Refer to the compose-file reference for more info https://docs.docker.com/compose/compose-file/
+#this section specifies the various services that comprise the project
+services:
+  #this service will be the mysql database that detections will be logged to
+  gatecounter-db: #how this service will be referenced in this file
+    image: yobasystems/alpine-mariadb:armhf
+    container_name: gatecounter-db #how docker itself will refer to this service and the hostname it will be accessible from other services, defaults to the service name
+    environment: #set environment variables for this service.  These will initialize a database
+    #these environment variables will specify how the gate counter script will connect to the db to record data
+      MYSQL_DATABASE: ${MYSQL_DB_NAME:-gatecounter}
+      MYSQL_USER: ${MYSQL_USER:-gatecounter}
+      MYSQL_PASSWORD: ${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PW:?an admin database password is requred.  Please edit .env with this value}
+      TZ: ${TZ:-America/New_York}
+    volumes: #specify where data to be peristed will be stored on host and where it resides within the service
+      - gatecounter-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
+      - ./sql:/docker-entrypoint-initdb.d
+    restart: unless-stopped #keep this service running unless told explicitly to stop
+    networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
+      - gatecounter
+    labels: #can be used to communicate info about this service to other services
+      - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
+    healthcheck: #this command is run periodically so docker can know whether or not this service is actually accessible.  Completely optional.
+      test: ["CMD-SHELL", "mysqladmin -u ${MYSQL_USER:-gatecounter} -h 127.0.0.1 --password=${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value} ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    ports:
+      - "3306:3306" #connects port 3306 of the host (left) to 3306 of this container (right) making it accessible to things outside of our docker virtual network
+    expose:
+      - "3306"
+    
+
+  grafana:
+    image: grafana/grafana-arm32v7-linux
+    container_name: grafana #redundant, would have defaulted to the service name anyway
+    volumes:
+      - ./configs/grafana.ini:/etc/grafana/grafana.ini #maps grafana.ini in this directory into the container
+      - grafana_data:/var/lib/grafana
+      - grafana_home:/usr/share/grafana
+      - grafana_logs:/var/log/grafana
+      - grafana_plugins:/var/lib/grafana/plugins
+      - grafana_provisioning:/etc/grafana/provisioning
+    labels:
+      - traefik.enable=true #enable forwarding of http requests to this container
+      - traefik.frontend.rule=Host:${GRAFANA_DOMAIN_NAME} #when a request is received for this domain...
+      - traefik.backend=grafana #forward the request to this container...
+      - traefik.port=3000 #on this port...
+      - traefik.protocol=http #forwarding the request in plain http on the internal virtual network
+    expose:
+      - "3000" #makes this port accessible to other containers on the same network, but not availble directly on the host system
+    depends_on: #specifies which containers must be up and running before this one can be started
+      #- reverse-proxy
+      - gatecounter-db
+    environment: 
+      GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN_NAME}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PW:?an admin password is requred for Grafana.  Please edit .env with this value}
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS}
+    networks:
+      - gatecounter
+
+  grafana-db: #how this service will be referenced in this file
+    image: yobasystems/alpine-mariadb:armhf
+    container_name: grafana-db #how docker itself will refer to this service and the hostname it will be accessible from other services, defaults to the service name
+    environment: #set environment variables for this service.  These will initialize a database    #these environment variables will specify how the gate counter script will connect to the db to record data
+      MYSQL_DATABASE: ${GRAFANA_DB_NAME:-grafana}
+      MYSQL_ROOT_PASSWORD: ${GRAFANA_DB_ROOT_PW:?an admin database password is requred for grafana database.  Please edit .env with this value}
+      TZ: ${TZ:-America/New_York}
+    volumes: #specify where data to be peristed will be stored on host and where it resides within the service
+      - grafana-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
+    restart: unless-stopped #keep this service running unless told explicitly to stop
+    networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
+      - gatecounter
+    labels: #can be used to communicate info about this service to other services
+      - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
+    healthcheck: #this command is run periodically so docker can know whether or not this service is actually accessible.  Completely optional.
+      test: ["CMD-SHELL", "mysqladmin -u $$MYSQL_USER --password=$$MYSQL_PASSWORD ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    expose:
+      - "3306" #this database only needs to be accessible internally to grafana
+
+  #this container makes sure a domain you register for free on https://duckdns.org always points to where this is running
+  dynamic-dns: 
+    image: lsioarmhf/duckdns
+    container_name: duckdns
+    environment: 
+      SUBDOMAINS: ${DUCKDNS_SUBDOMAIN:?Please provide a duckdns subdomain for your project.  Please edit .env with this value} #replace with the domain you registered.
+      TOKEN: ${DUCKDNS_TOKEN:?Please provide a duckdns token for your domain.  Please edit .env with this value} #the token duckDNS provides you for domain updates
+      TZ: ${TZ:-America/New_York}
+    labels:
+      - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
+    restart: always #if this container stops for any reason, docker will restart it automatically
+    networks:
+      - default #put this service on the built-in docker bridge network
+
+  reverse-proxy:
+    image: traefik:latest
+    container_name: traefik-gc #referenced in ./configs/traefik.toml by this name in [api] section
+    restart: unless-stopped #Docker will automatically restart this container unless you intentionally stopped it
+    ports:
+      - 80:80
+      - 443:443
+      - 8080:8080 #admin web UI port
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  #allows traefik to monitor for changes and to read labels
+      - ./configs/traefik.toml:/etc/traefik/traefik.toml #traefik config file
+      - traefik-cert-gc:/etc/traefik/acme/ #volume for storing LetsEncrypt cets
+    #The following section allows you to deifne services which must be started before this service can start
+    depends_on:
+      - dynamic-dns
+    environment:
+      DUCKDNS_TOKEN: ${DUCKDNS_TOKEN:?Please provide a duckdns token for your domain.  Please edit .env with this value} #allows traefik to obtain ssl certs for your domain(s) automatically enabling you to use https for security
+    networks:
+      - gatecounter
+
+#this section specifies where data will be persisted between starts/stops/recreates, etc.  I will be using named docker volumes because that is the most portable
+#way to do this (you don't have to know about the directory structure of where you're going to run it), but you can map host system directories into your containers
+#if you so choose.  You can also specify options for them here.  
+volumes:
+  gatecounter-db:
+  grafana-db:
+  traefik-cert-gc:
+  grafana_data:
+  grafana_home:
+  grafana_logs:
+  grafana_plugins:
+  grafana_provisioning:
+
+#this section specifies virtual networks that will be used and any options you want to set for them
+networks:
+  gatecounter:
