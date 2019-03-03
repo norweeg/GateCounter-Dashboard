@@ -132,6 +132,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  #allows traefik to monitor for changes and to read labels
       - ./configs/traefik.toml:/etc/traefik/traefik.toml #traefik config file
+      - ./rules:/etc/traefik/rules
       - traefik-cert-gc:/etc/traefik/acme/ #volume for storing LetsEncrypt cets
     #The following section allows you to deifne services which must be started before this service can start
     depends_on:
