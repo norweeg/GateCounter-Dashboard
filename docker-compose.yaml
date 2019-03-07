@@ -40,7 +40,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PW:?an admin database password is requred.  Please edit .env with this value}
       TZ: ${TZ:-America/New_York}
     volumes: #specify where data to be peristed will be stored on host and where it resides within the service
-      - gatecounter-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
+      - gatecounter-db:/var/lib/mysql #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
       - ./sql:/docker-entrypoint-initdb.d
     networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
       - gatecounter
@@ -93,7 +93,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${GRAFANA_DB_ROOT_PW:?an admin database password is requred for grafana database.  Please edit .env with this value}
       TZ: ${TZ:-America/New_York}
     volumes: #specify where data to be peristed will be stored on host and where it resides within the service
-      - grafana-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
+      - grafana-db:/var/lib/mysql #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
     restart: unless-stopped #keep this service running unless told explicitly to stop
     networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
       - gatecounter
@@ -128,7 +128,7 @@ services:
     ports:
       - 80:80
       - 443:443
-      - 8080:8080 #admin web UI port
+#      - 8080:8080 #admin web UI port
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  #allows traefik to monitor for changes and to read labels
       - ./configs/traefik.toml:/etc/traefik/traefik.toml #traefik config file
