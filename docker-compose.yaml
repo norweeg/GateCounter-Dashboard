@@ -122,7 +122,7 @@ services:
       - default #put this service on the built-in docker bridge network
 
   reverse-proxy:
-    image: traefik:latest
+    image: traefik:v1.7
     container_name: traefik-gc #referenced in ./configs/traefik.toml by this name in [api] section
     restart: unless-stopped #Docker will automatically restart this container unless you intentionally stopped it
     ports:
