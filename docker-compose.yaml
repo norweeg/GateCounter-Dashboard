@@ -1,6 +1,32 @@
 version: '3.7' #specifies the version of the compose-file specification to use.  Refer to the compose-file reference for more info https://docs.docker.com/compose/compose-file/
 #this section specifies the various services that comprise the project
 services:
+  gatecounter:
+    build:
+      context: .  #build a custom python container to run the gatecounter script
+    container_name: gatecounter
+    privileged: true  #enable access to GPIO from Docker Container
+    volumes:
+      #make the scripts acessible to the container, read-only
+      - ${PWD}/gatecounter-scripts:/usr/src/app:ro
+    labels:
+      - traefik.enable=false
+    networks:
+      - gatecounter
+    restart: unless-stopped
+    depends_on: 
+      - gatecounter-db
+    command:
+      - "${GATECOUNTER_SCRIPT:?The name of a gatecounter script in the gatecounter-scripts directory is required.  Please edit .env and add a value for GATECOUNTER_SCRIPT}"
+      - "-H"
+      - "gatecounter-db"
+      - "-d"
+      - "${MYSQL_DB_NAME}"
+      - "-u"
+      - "${MYSQL_USER}"
+      - "-p"
+      - "${MYSQL_USER_PW}"
+
   #this service will be the mysql database that detections will be logged to
   gatecounter-db: #how this service will be referenced in this file
     image: yobasystems/alpine-mariadb:armhf
@@ -13,8 +39,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PW:?an admin database password is requred.  Please edit .env with this value}
       TZ: ${TZ:-America/New_York}
     volumes: #specify where data to be peristed will be stored on host and where it resides within the service
-      - gatecounter-db:/config #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
-      - ./sql:/docker-entrypoint-initdb.d
+      - gatecounter-db:/var/lib/mysql #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
     restart: unless-stopped #keep this service running unless told explicitly to stop
     networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
       - gatecounter
@@ -25,41 +50,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    ports:
-      - "3306:3306" #connects port 3306 of the host (left) to 3306 of this container (right) making it accessible to things outside of our docker virtual network
     expose:
       - "3306"
-
-  gatecounter-db-init: #how this service will be referenced in this file
-    image: yobasystems/alpine-mariadb:armhf
-    environment: #set environment variables for this service.  These will initialize a database
-    #these environment variables will specify how the gate counter script will connect to the db to record data
-      MYSQL_DATABASE: ${MYSQL_DB_NAME:-gatecounter}
-      MYSQL_USER: ${MYSQL_USER:-gatecounter}
-      MYSQL_PASSWORD: ${MYSQL_USER_PW:?a non-admin database password is requred.  Please edit .env with this value}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PW:?an admin database password is requred.  Please edit .env with this value}
-      TZ: ${TZ:-America/New_York}
-    volumes: #specify where data to be peristed will be stored on host and where it resides within the service
-      - gatecounter-db:/var/lib/mysql #left of the : is the name of a docker volume to store data in, right of it is where it is located in the service
-      - ./sql:/docker-entrypoint-initdb.d
-    networks: #virtual network for services to connect to each other through. necessary to resolve their container_name to their virtual ip address
-      - gatecounter
-    labels: #can be used to communicate info about this service to other services
-      - traefik.enable=false #tells traefik reverse proxy to ignore this container, do not proxy requests to it
-      - com.docker.compose.oneoff=true
-    entrypoint:
-      - /bin/sh
-      - -c
-      - "\"mysql -h $$HOSTNAME -u root -D ${MYSQL_DB_NAME} -p${MYSQL_ROOT_PW} < /docker-entrypoint-initdb.d/db-init.sql\""
-    depends_on:
-      - gatecounter-db
-    expose:
-      - "3306"
-
 
   grafana:
-    image: grafana/grafana-arm32v7-linux
+    image: grafana/grafana:latest
     container_name: grafana #redundant, would have defaulted to the service name anyway
+    restart: unless-stopped
     volumes:
       - ./configs/grafana.ini:/etc/grafana/grafana.ini #maps grafana.ini in this directory into the container
       - grafana_data:/var/lib/grafana
@@ -68,15 +65,19 @@ services:
       - grafana_plugins:/var/lib/grafana/plugins
       - grafana_provisioning:/etc/grafana/provisioning
     labels:
-      - traefik.enable=true #enable forwarding of http requests to this container
-      - traefik.frontend.rule=Host:${GRAFANA_DOMAIN_NAME} #when a request is received for this domain...
-      - traefik.backend=grafana #forward the request to this container...
-      - traefik.port=3000 #on this port...
-      - traefik.protocol=http #forwarding the request in plain http on the internal virtual network
+      - traefik.enable=true #enable forwarding of requests to this container
+      - traefik.http.routers.grafana-http.rule=Host(`${GRAFANA_DOMAIN_NAME}`) #when a request is received for this domain, forward the request to this container...
+      - traefik.http.routers.grafana-http.entrypoints=http
+      - traefik.http.routers.grafana-http.middlewares=https-only #redirect all http requests to https
+      - traefik.http.routers.grafana-https.entrypoints=https
+      - traefik.http.routers.grafana-https.tls=true
+      - traefik.http.routers.grafana-https.tls.certResolver=gatecounter
+      - traefik.http.services.grafana.loadbalancer.server.port=3000 #on this port...
     expose:
       - "3000" #makes this port accessible to other containers on the same network, but not availble directly on the host system
     depends_on: #specifies which containers must be up and running before this one can be started
       - reverse-proxy
+      - grafana-db
       - gatecounter-db
     environment:
       GF_SERVER_ROOT_URL: https://${GRAFANA_DOMAIN_NAME}
@@ -122,17 +123,29 @@ services:
       - default #put this service on the built-in docker bridge network
 
   reverse-proxy:
-    image: traefik:v1.7
-    container_name: traefik-gc #referenced in ./configs/traefik.toml by this name in [api] section
+    image: traefik:latest
+    container_name: traefik
+    command:
+      - "--api=false"
+      - "--entryPoints.http.address=:80"
+      - "--entryPoints.https.address=:443"
+      - "--providers.docker=true"
+      - "--accesslog=true"
+      - "--log=true"
+      - "--log.level=INFO"
+      - "--certificatesResolvers.gatecounter.acme.email=${EMAIL_ADDRESS:?An email address to use to obtain a SSL Cert is required.   Please edit .env with this value}"
+      - "--certificatesResolvers.gatecounter.acme.storage=/etc/traefik/acme/acme.json"
+      - "--certificatesResolvers.gatecounter.acme.dnsChallenge=true"
+      - "--certificatesResolvers.gatecounter.acme.dnsChallenge.provider=duckdns"
+    labels:
+      - "traefik.http.middlewares.https-only.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.https-only.redirectscheme.permanent=true"      
     restart: unless-stopped #Docker will automatically restart this container unless you intentionally stopped it
     ports:
       - 80:80
       - 443:443
-#      - 8080:8080 #admin web UI port
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  #allows traefik to monitor for changes and to read labels
-      - ./configs/traefik.toml:/etc/traefik/traefik.toml #traefik config file
-      - ./rules:/etc/traefik/rules
       - traefik-cert-gc:/etc/traefik/acme/ #volume for storing LetsEncrypt cets
     #The following section allows you to deifne services which must be started before this service can start
     depends_on:
