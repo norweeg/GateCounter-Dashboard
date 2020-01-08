@@ -7,7 +7,7 @@ import sys
 from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor, CancelledError, wait
 from datetime import datetime
-from queue import Queue
+from queue import SimpleQueue
 
 import RPi.GPIO as GPIO
 
@@ -30,11 +30,11 @@ Base = declarative_base()
 class PIR_Detection(Base):
     __tablename__ = "PIRSTATS"
 
-    time = Column('datetime', DateTime, nullable=False, primary_key=True)
+    timestamp = Column('timestamp', DateTime, nullable=False, primary_key=True)
     count = Column('count', Integer, nullable=False)
 
 
-Detection=collections.namedtuple("Detection", ['time','count'])
+Detection=collections.namedtuple("Detection", ['timestamp','count'])
 
 class PIRgate:
     def __init__(self, hostname, username, password, database):
@@ -46,7 +46,7 @@ class PIRgate:
         GPIO.setup(self.PIR_PIN, GPIO.IN)
         # End GPIO setup
         self._pool=ThreadPoolExecutor()
-        self._detection_queue=Queue()
+        self._detection_queue=SimpleQueue()
         if not hostname:
             stdout,stderr = subprocess.Popen(['docker',
                                               'inspect',
@@ -80,7 +80,7 @@ class PIRgate:
             try:
                 detection = self._detection_queue.get()
                 session = self.Session()
-                session.add(PIR_Detection(time=detection.datetime, count=detection.count))
+                session.add(PIR_Detection(timestamp=detection.timestamp, count=detection.count))
             except KeyboardInterrupt:
                 session.rollback()
                 raise

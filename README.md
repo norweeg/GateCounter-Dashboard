@@ -16,7 +16,7 @@ Please also, in a developer's text editor e.g. NotePad++ or Microsoft Visual Stu
 * Register for [DuckDNS](https://www.duckdns.org/) and have your subdomain name and token ready
 * Make sure ports 80 and 443 are accessible on your host machine and your machine has a connection to the Internet
 * Copy .env.template to .env with `cp .env.template .env` *DO NOT COMMIT AND PUSH .env TO A PUBLIC GIT REPOSITORY UNLESS YOU WANT TO GET HACKED!!!*
-* Edit the files .env, .configs/traefik.toml, and .configs/grafana.ini, updating configuration values with your desired configuration
+* Edit the files .env and .configs/grafana.ini, updating configuration values with your desired configuration
 * Run `docker-compose config` from this directory to doublecheck that docker-compose.yaml file contains no syntax errors and that all your options from .env were correctly filled in
 
 ## Creating Your Stack
@@ -32,6 +32,7 @@ To Stop or (re)Start a container in your stack without removing it, run `docker-
 Run the following commands to update the images your containers use and recreate/restart the containers using them
 
 ```bash
+docker-compose build
 docker-compose pull
 docker-compose up -d
 docker image prune -f
